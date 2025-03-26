@@ -13,3 +13,4 @@ def create_layout():
         dcc.Graph(id='rocket-orientation'),
         dcc.Interval(id='interval-component', interval=100, n_intervals=0)
     ], fluid=True)
+

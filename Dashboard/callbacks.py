@@ -1,4 +1,4 @@
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 import plotly.graph_objs as go
 import numpy as np
 from collections import deque
@@ -12,19 +12,41 @@ window_size = 10
 accel_history = np.zeros((10, 3))
 gyro_history = np.zeros((10, 3))
 
+roll, pitch, yaw = 0, 0, 0
 
 def register_callbacks(app):
     @app.callback(
         [Output('imu-graph-accel', 'figure'),
          Output('imu-graph-gyro', 'figure')],
-        [Input('interval-component', 'n_intervals')]
+         Output('rocket-orientation', 'figure'),       
+        [Input('interval-component', 'n_intervals')],
+        [State("plotting-state", "data")]
     )
-    def update_graph(n_intervals):
+    def update_graph(n_intervals, plotting_state):
+        global roll, pitch, yaw
+
+        if not plotting_state["running"]:  # If paused, return empty figures
+            return go.Figure(), go.Figure(), go.Figure()
+        
         try:
             # Read from serial
             line = ser.readline().decode('utf-8').strip()
             values = [float(x) for x in line.split(',')]
 
+            accel_data = values[:3]  # Acceleration Data
+            gyro_data = values[3:]   # Gyroscope Data (degrees/s)
+
+            # Integrate gyro data to estimate orientation
+            dt = 0.2  # Time step (adjust based on actual IMU update rate)
+            roll += gyro_data[0] * dt
+            pitch += gyro_data[1] * dt
+            yaw += gyro_data[2] * dt
+
+            # Ensure angles stay within -180 to 180 degrees
+            roll = (roll + 180) % 360 - 180
+            pitch = (pitch + 180) % 360 - 180
+            yaw = (yaw + 180) % 360 - 180
+            
             # Shift old values left
             global accel_history, gyro_history
             accel_history[:-1] = accel_history[1:]  # Shift up (drop oldest)
@@ -62,8 +84,31 @@ def register_callbacks(app):
                 template="plotly_dark"
             )
 
-            return accel_fig, gyro_fig
+            # 3D Rocket Orientation Plot
+            rocket_fig = go.Figure()
+        
+            # Rocket body as a cone
+            rocket_fig.add_trace(go.Cone(
+                x=[0], y=[0], z=[0],  
+                u=[np.cos(np.radians(yaw))],  
+                v=[np.sin(np.radians(yaw))],  
+                w=[np.sin(np.radians(pitch))],  
+                colorscale='Blues',
+                sizemode="absolute",
+                sizeref=1
+            ))
+
+            rocket_fig.update_layout(
+                title="Rocket Orientation",
+                scene=dict(
+                    xaxis=dict(title="X"),
+                    yaxis=dict(title="Y"),
+                    zaxis=dict(title="Z")
+                ),
+                template="plotly_dark"
+            )
+
+            return accel_fig, gyro_fig, rocket_fig
 
         except Exception as e:
-            return go.Figure(), go.Figure()  # Return empty figures if there's an error
-
+            return go.Figure(), go.Figure(), go.Figure()
